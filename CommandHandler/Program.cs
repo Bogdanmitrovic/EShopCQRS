@@ -1,3 +1,7 @@
+using System.Text;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -16,29 +20,35 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
+
+var factory = new ConnectionFactory
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
+    UserName = "guest",
+    Password = "guest",
+    VirtualHost = "/",
+    HostName = "localhost"
+};
+var connection = factory.CreateConnection();
+var channel = connection.CreateModel();
+channel.QueueDeclare(queue: "command_queue",
+    durable: true,
+    exclusive: false,
+    autoDelete: false,
+    arguments: null);
+var consumer = new EventingBasicConsumer(channel);
+consumer.Received += (ch, ea) =>
+{
+    Console.WriteLine("received!");
+    var body = ea.Body.ToArray();
+    var message = Encoding.UTF8.GetString(body);
+    
+    Console.WriteLine(message);
+    channel.BasicAck(ea.DeliveryTag, false);
 };
 
-app.MapGet("/weatherforecast", () =>
-    {
-        var forecast = Enumerable.Range(1, 5).Select(index =>
-                new WeatherForecast
-                (
-                    DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-                    Random.Shared.Next(-20, 55),
-                    summaries[Random.Shared.Next(summaries.Length)]
-                ))
-            .ToArray();
-        return forecast;
-    })
-    .WithName("GetWeatherForecast")
-    .WithOpenApi();
+var consumerTag = channel.BasicConsume("command_queue", false, consumer);
+
 
 app.Run();
 
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
+channel.BasicCancel(consumerTag);
